@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -7,17 +8,28 @@
     <title>Santa Scramble</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+      
       body {
-        font-family: 'VT323', monospace;
+        font-family: 'Press Start 2P', cursive;
         margin: 0;
         background-color: #0f172a;
         overflow: hidden;
+        color: white;
       }
-      /* Disable touch gestures */
+
+      /* Essential for the retro look */
       canvas {
         touch-action: none;
-        image-rendering: pixelated; /* Essential for the retro look */
+        image-rendering: pixelated;
+      }
+
+      .retro-shadow {
+        text-shadow: 2px 2px 0px #000;
+      }
+
+      .pixel-font {
+        font-family: 'Press Start 2P', cursive;
       }
     </style>
   <script type="importmap">

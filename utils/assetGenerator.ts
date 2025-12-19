@@ -37,7 +37,8 @@ export const createTextures = (): Record<string, THREE.Texture> => {
   textures['santa_climb_0'] = drawSprite(SPRITES.SANTA_CLIMB_0);
   textures['santa_climb_1'] = drawSprite(SPRITES.SANTA_CLIMB_1);
   
-  textures['reindeer'] = drawSprite(SPRITES.REINDEER);
+  textures['reindeer_0'] = drawSprite(SPRITES.REINDEER_0);
+  textures['reindeer_1'] = drawSprite(SPRITES.REINDEER_1);
   textures['snowman'] = drawSprite(SPRITES.SNOWMAN);
   textures['tree'] = drawSprite(SPRITES.TREE);
   textures['floor'] = drawSprite(SPRITES.FLOOR);
@@ -59,8 +60,9 @@ export const createTextures = (): Record<string, THREE.Texture> => {
     textures[variant.name] = drawSprite(matrix);
   });
 
-  // Alias for backward compatibility if needed
+  // Alias for backward compatibility
   textures['santa'] = textures['santa_idle'];
+  textures['reindeer'] = textures['reindeer_0'];
   textures['gift'] = textures['gift_red'];
 
   return textures;

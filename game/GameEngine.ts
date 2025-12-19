@@ -23,6 +23,13 @@ interface Entity {
   animTimer: number;
 }
 
+interface Particle {
+  mesh: THREE.Mesh;
+  velocity: THREE.Vector2;
+  life: number;
+  maxLife: number;
+}
+
 export class GameEngine {
   private container: HTMLDivElement;
   private scene: THREE.Scene;
@@ -34,6 +41,7 @@ export class GameEngine {
   private entities: Entity[] = [];
   private solids: Rect[] = [];
   private ladders: Rect[] = [];
+  private particles: Particle[] = [];
   
   private player: Entity | null = null;
   private isRunning = false;
@@ -46,6 +54,9 @@ export class GameEngine {
 
   private score = 0;
   private lives = 3;
+
+  // Shared geometry for particles
+  private particleGeo = new THREE.PlaneGeometry(3, 3);
 
   constructor(
     container: HTMLDivElement, 
@@ -93,28 +104,30 @@ export class GameEngine {
   private initLevel() {
     // Clear all existing objects from scene and state
     this.entities.forEach(e => this.scene.remove(e.mesh));
+    this.particles.forEach(p => this.scene.remove(p.mesh));
     this.scene.children = this.scene.children.filter(child => child instanceof THREE.GridHelper);
 
     this.entities = [];
+    this.particles = [];
     this.solids = [];
     this.ladders = [];
 
     const mapTemplate = [
       "                         ",
-      "    R           R    ",
+      "  R  H          R  H     ",
       "#####H#####   #####H#####",
       "     H             H     ",
       "     H      H      H     ",
       "#####H######H######H#####",
       "     H      H      H     ",
       "     H   @  H      H  S  ",
-      "#####H######H######H#####",
+      " ####H######H######H#### ",
       "     H      H      H     ",
       "     H      H   S  H     ",
       "#####H######H######H#####",
       "     H             H     ",
       "  R  H             H  R  ",
-      "#########################",
+      " ####################### ",
     ].reverse();
 
     // Create Solids and Ladders
@@ -144,7 +157,7 @@ export class GameEngine {
         if (char === '@') {
           this.player = this.createEntity(pos.x, pos.y, EntityType.PLAYER, 'santa_idle');
         } else if (char === 'R') {
-          this.createEntity(pos.x, pos.y, EntityType.ENEMY_REINDEER, 'reindeer');
+          this.createEntity(pos.x, pos.y, EntityType.ENEMY_REINDEER, 'reindeer_0');
         } else if (char === 'S') {
           this.createEntity(pos.x, pos.y, EntityType.ENEMY_SNOWMAN, 'snowman');
         }
@@ -280,6 +293,30 @@ export class GameEngine {
     return entity;
   }
 
+  private spawnExplosion(x: number, y: number) {
+    const particleCount = 12;
+    const particleColors = [COLORS.RED, COLORS.YELLOW, COLORS.GREEN, COLORS.WHITE, COLORS.PINK, COLORS.TEAL];
+    
+    for (let i = 0; i < particleCount; i++) {
+      const color = particleColors[Math.floor(Math.random() * particleColors.length)];
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 });
+      const mesh = new THREE.Mesh(this.particleGeo, mat);
+      
+      mesh.position.set(x, y, 2);
+      this.scene.add(mesh);
+      
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 100 + Math.random() * 150;
+      
+      this.particles.push({
+        mesh,
+        velocity: new THREE.Vector2(Math.cos(angle) * speed, Math.sin(angle) * speed),
+        life: 0.6 + Math.random() * 0.4,
+        maxLife: 0.6 + Math.random() * 0.4
+      });
+    }
+  }
+
   private start() {
     this.isRunning = true;
     this.lastTime = performance.now();
@@ -334,6 +371,24 @@ export class GameEngine {
     this.updatePlayerAnimation(dt);
     this.constrainToWorld(this.player);
 
+    // Update particles
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.life -= dt;
+      if (p.life <= 0) {
+        this.scene.remove(p.mesh);
+        this.particles.splice(i, 1);
+        continue;
+      }
+      
+      p.velocity.y -= GRAVITY * dt * 0.5; // Half gravity for lighter particles
+      p.mesh.position.x += p.velocity.x * dt;
+      p.mesh.position.y += p.velocity.y * dt;
+      
+      const mat = p.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = p.life / p.maxLife;
+    }
+
     for (const entity of this.entities) {
       if (entity === this.player) continue;
 
@@ -341,6 +396,7 @@ export class GameEngine {
           if (this.checkCollision(this.player.rect, entity.rect)) {
               this.score += 100;
               this.onScoreUpdate(this.score);
+              this.spawnExplosion(entity.mesh.position.x, entity.mesh.position.y);
               this.removeEntity(entity);
           }
       } else if (entity.type === EntityType.ENEMY_REINDEER || entity.type === EntityType.ENEMY_SNOWMAN) {
@@ -360,6 +416,21 @@ export class GameEngine {
         this.moveEntity(entity, dt);
         this.constrainToWorld(entity);
         
+        // Enemy Animation Update
+        if (entity.type === EntityType.ENEMY_REINDEER) {
+            entity.animTimer += dt;
+            if (entity.animTimer > 0.15) {
+                entity.animTimer = 0;
+                entity.animFrame = (entity.animFrame + 1) % 2;
+                const texKey = `reindeer_${entity.animFrame}`;
+                const mat = entity.mesh.material as THREE.MeshBasicMaterial;
+                if (mat.map !== this.textures[texKey]) {
+                    mat.map = this.textures[texKey];
+                    mat.needsUpdate = true;
+                }
+            }
+        }
+
         if (entity.velocity.x === 0) {
             entity.direction *= -1;
         }
