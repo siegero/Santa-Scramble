@@ -40,7 +40,11 @@ export const createTextures = (): Record<string, THREE.Texture> => {
   textures['reindeer_0'] = drawSprite(SPRITES.REINDEER_0);
   textures['reindeer_1'] = drawSprite(SPRITES.REINDEER_1);
   textures['snowman'] = drawSprite(SPRITES.SNOWMAN);
-  textures['tree'] = drawSprite(SPRITES.TREE);
+  
+  // Register the 2 tree variants
+  textures['tree_0'] = drawSprite(SPRITES.TREE_0);
+  textures['tree_1'] = drawSprite(SPRITES.TREE_1);
+  
   textures['floor'] = drawSprite(SPRITES.FLOOR);
   textures['ladder'] = drawSprite(SPRITES.LADDER);
 
@@ -64,6 +68,7 @@ export const createTextures = (): Record<string, THREE.Texture> => {
   textures['santa'] = textures['santa_idle'];
   textures['reindeer'] = textures['reindeer_0'];
   textures['gift'] = textures['gift_red'];
+  textures['tree'] = textures['tree_0']; // Default fallback
 
   return textures;
 };

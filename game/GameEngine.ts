@@ -4,7 +4,7 @@ import { InputManager } from './InputManager';
 import { createTextures } from '../utils/assetGenerator';
 import { 
   TILE_SIZE, WORLD_WIDTH, WORLD_HEIGHT, GRAVITY, JUMP_FORCE, 
-  MOVE_SPEED, COLORS, CLIMB_SPEED, ENEMY_SPEED 
+  MOVE_SPEED, COLORS, CLIMB_SPEED, ENEMY_SPEED, SPRITES
 } from '../constants';
 import { EntityType, Rect } from '../types';
 
@@ -21,6 +21,7 @@ interface Entity {
   state?: 'idle' | 'chase' | 'patrol';
   animFrame: number;
   animTimer: number;
+  lights?: THREE.Group; // Group of blinking lights for trees
 }
 
 interface Particle {
@@ -28,6 +29,14 @@ interface Particle {
   velocity: THREE.Vector2;
   life: number;
   maxLife: number;
+}
+
+interface SnowParticle {
+  mesh: THREE.Mesh;
+  speed: number;
+  drift: number;
+  driftSpeed: number;
+  offset: number;
 }
 
 export class GameEngine {
@@ -42,6 +51,7 @@ export class GameEngine {
   private solids: Rect[] = [];
   private ladders: Rect[] = [];
   private particles: Particle[] = [];
+  private snowParticles: SnowParticle[] = [];
   
   private player: Entity | null = null;
   private isRunning = false;
@@ -55,8 +65,10 @@ export class GameEngine {
   private score = 0;
   private lives = 3;
 
-  // Shared geometry for particles
+  // Shared geometries
   private particleGeo = new THREE.PlaneGeometry(3, 3);
+  private snowGeo = new THREE.PlaneGeometry(2, 2);
+  private lightGeo = new THREE.PlaneGeometry(1, 1);
 
   constructor(
     container: HTMLDivElement, 
@@ -97,15 +109,46 @@ export class GameEngine {
     this.textures = createTextures();
 
     this.initLevel();
+    this.initSnow();
     this.resize(container.clientWidth, container.clientHeight);
     this.start();
   }
 
+  private initSnow() {
+    const worldW = WORLD_WIDTH * TILE_SIZE;
+    const worldH = WORLD_HEIGHT * TILE_SIZE;
+    const snowCount = 60;
+
+    for (let i = 0; i < snowCount; i++) {
+      const mat = new THREE.MeshBasicMaterial({ 
+        color: COLORS.WHITE, 
+        transparent: true, 
+        opacity: 0.4 + Math.random() * 0.4 
+      });
+      const mesh = new THREE.Mesh(this.snowGeo, mat);
+      
+      const x = Math.random() * worldW;
+      const y = Math.random() * worldH;
+      mesh.position.set(x, y, -1);
+      this.scene.add(mesh);
+
+      this.snowParticles.push({
+        mesh,
+        speed: 12 + Math.random() * 20,
+        drift: 10 + Math.random() * 20,
+        driftSpeed: 0.8 + Math.random() * 1.5,
+        offset: Math.random() * Math.PI * 2
+      });
+    }
+  }
+
   private initLevel() {
-    // Clear all existing objects from scene and state
     this.entities.forEach(e => this.scene.remove(e.mesh));
     this.particles.forEach(p => this.scene.remove(p.mesh));
-    this.scene.children = this.scene.children.filter(child => child instanceof THREE.GridHelper);
+    this.scene.children = this.scene.children.filter(child => 
+        child instanceof THREE.GridHelper || 
+        this.snowParticles.some(sp => sp.mesh === child)
+    );
 
     this.entities = [];
     this.particles = [];
@@ -130,7 +173,6 @@ export class GameEngine {
       " ####################### ",
     ].reverse();
 
-    // Create Solids and Ladders
     for (let y = 0; y < mapTemplate.length; y++) {
       const row = mapTemplate[y];
       for (let x = 0; x < row.length; x++) {
@@ -147,7 +189,6 @@ export class GameEngine {
       }
     }
 
-    // Create Core Gameplay Entities
     for (let y = 0; y < mapTemplate.length; y++) {
       const row = mapTemplate[y];
       for (let x = 0; x < row.length; x++) {
@@ -164,7 +205,6 @@ export class GameEngine {
       }
     }
 
-    // Procedural Gift Placement
     const giftVariants = ['gift_red', 'gift_green', 'gift_orange', 'gift_blue', 'gift_purple', 'gift_yellow', 'gift_teal'];
     const allFloorLevels: { y: number; spots: number[] }[] = [];
     for (let y = 1; y < mapTemplate.length; y++) {
@@ -217,7 +257,7 @@ export class GameEngine {
         giftsPlaced++;
     }
 
-    // Procedural Trees
+    // Procedural Trees with randomization across available variants
     for (let y = 1; y < mapTemplate.length; y++) {
       let treesOnThisFloor = 0;
       const row = mapTemplate[y];
@@ -235,7 +275,8 @@ export class GameEngine {
       for (const x of availableX) {
         if (treesOnThisFloor < 4) {
           if (Math.random() < 0.25) { 
-            this.createEntity(x * TILE_SIZE, y * TILE_SIZE, EntityType.DECORATION, 'tree');
+            const treeVariant = Math.floor(Math.random() * 2);
+            this.createEntity(x * TILE_SIZE, y * TILE_SIZE, EntityType.DECORATION, `tree_${treeVariant}`);
             treesOnThisFloor++;
           }
         }
@@ -289,8 +330,57 @@ export class GameEngine {
         entity.rect.x += 2;
     }
 
+    if (type === EntityType.DECORATION && textureKey.startsWith('tree')) {
+      this.addBlinkingLightsToTree(entity, textureKey);
+    }
+
     this.entities.push(entity);
     return entity;
+  }
+
+  private addBlinkingLightsToTree(entity: Entity, textureKey: string) {
+    const spriteKey = textureKey.toUpperCase() as keyof typeof SPRITES;
+    const matrix = SPRITES[spriteKey];
+    if (!matrix) return;
+
+    const validPositions: {x: number, y: number}[] = [];
+    for (let r = 0; r < matrix.length; r++) {
+      for (let c = 0; c < matrix[r].length; c++) {
+        if (matrix[r][c] === 7) { // 7 is Green (Leaves)
+          validPositions.push({ x: c, y: r });
+        }
+      }
+    }
+
+    if (validPositions.length === 0) return;
+
+    const lightsGroup = new THREE.Group();
+    const lightColors = [COLORS.RED, COLORS.YELLOW, COLORS.TEAL, COLORS.PINK, COLORS.BLUE];
+    const lightCount = 6 + Math.floor(Math.random() * 4);
+
+    for (let i = 0; i < lightCount; i++) {
+      const idx = Math.floor(Math.random() * validPositions.length);
+      const pos = validPositions.splice(idx, 1)[0];
+      
+      const color = lightColors[Math.floor(Math.random() * lightColors.length)];
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 });
+      const lightMesh = new THREE.Mesh(this.lightGeo, mat);
+
+      // Convert grid coordinates (0-15) to local plane coordinates (-7.5 to 7.5)
+      // Plane is TILE_SIZE x TILE_SIZE (16x16)
+      const lx = pos.x - 7.5;
+      const ly = 7.5 - pos.y;
+      
+      lightMesh.position.set(lx, ly, 0.1);
+      // Store random phase for blinking
+      lightMesh.userData.blinkPhase = Math.random() * Math.PI * 2;
+      lightMesh.userData.blinkSpeed = 3 + Math.random() * 5;
+
+      lightsGroup.add(lightMesh);
+    }
+
+    entity.lights = lightsGroup;
+    entity.mesh.add(lightsGroup);
   }
 
   private spawnExplosion(x: number, y: number) {
@@ -329,12 +419,12 @@ export class GameEngine {
     const dt = Math.min((now - this.lastTime) / 1000, 0.1);
     this.lastTime = now;
 
-    this.update(dt);
+    this.update(dt, now);
     this.renderer.render(this.scene, this.camera);
     requestAnimationFrame(this.loop);
   };
 
-  private update(dt: number) {
+  private update(dt: number, now: number) {
     if (!this.player) return;
 
     const axis = this.input.getAxis();
@@ -371,7 +461,18 @@ export class GameEngine {
     this.updatePlayerAnimation(dt);
     this.constrainToWorld(this.player);
 
-    // Update particles
+    const worldW = WORLD_WIDTH * TILE_SIZE;
+    const worldH = WORLD_HEIGHT * TILE_SIZE;
+    for (const p of this.snowParticles) {
+      p.mesh.position.y -= p.speed * dt;
+      p.mesh.position.x += Math.sin(now / 1000 * p.driftSpeed + p.offset) * p.drift * dt;
+      
+      if (p.mesh.position.y < -TILE_SIZE) {
+        p.mesh.position.y = worldH + TILE_SIZE;
+        p.mesh.position.x = Math.random() * worldW;
+      }
+    }
+
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.life -= dt;
@@ -381,7 +482,7 @@ export class GameEngine {
         continue;
       }
       
-      p.velocity.y -= GRAVITY * dt * 0.5; // Half gravity for lighter particles
+      p.velocity.y -= GRAVITY * dt * 0.5;
       p.mesh.position.x += p.velocity.x * dt;
       p.mesh.position.y += p.velocity.y * dt;
       
@@ -390,6 +491,19 @@ export class GameEngine {
     }
 
     for (const entity of this.entities) {
+      // Update tree lights blinking
+      if (entity.lights) {
+        entity.lights.children.forEach((light: THREE.Object3D) => {
+          const l = light as THREE.Mesh;
+          const phase = l.userData.blinkPhase;
+          const speed = l.userData.blinkSpeed;
+          // Blinking effect: sudden on/off logic
+          const val = Math.sin((now / 1000) * speed + phase);
+          const mat = l.material as THREE.MeshBasicMaterial;
+          mat.opacity = val > 0.3 ? 1 : 0;
+        });
+      }
+
       if (entity === this.player) continue;
 
       if (entity.type === EntityType.GIFT) {
@@ -416,7 +530,6 @@ export class GameEngine {
         this.moveEntity(entity, dt);
         this.constrainToWorld(entity);
         
-        // Enemy Animation Update
         if (entity.type === EntityType.ENEMY_REINDEER) {
             entity.animTimer += dt;
             if (entity.animTimer > 0.15) {
@@ -457,7 +570,6 @@ export class GameEngine {
     const isMovingY = Math.abs(this.player.velocity.y) > 10;
 
     if (this.player.onLadder) {
-        // Climbing animation
         const animSpeed = 0.1;
         if (isMovingY) {
             this.player.animTimer += dt;
@@ -467,13 +579,11 @@ export class GameEngine {
             }
         }
         textureKey = `santa_climb_${this.player.animFrame}`;
-        this.player.mesh.scale.x = 1; // Always face ladder
+        this.player.mesh.scale.x = 1;
     } else if (!this.player.grounded) {
-        // Jump pose
         textureKey = 'santa_jump';
         this.player.mesh.scale.x = this.player.direction;
     } else if (isMovingX) {
-        // Running animation
         const animSpeed = 0.12;
         this.player.animTimer += dt;
         if (this.player.animTimer > animSpeed) {
@@ -483,7 +593,6 @@ export class GameEngine {
         textureKey = `santa_run_${this.player.animFrame}`;
         this.player.mesh.scale.x = this.player.direction;
     } else {
-        // Idle
         textureKey = 'santa_idle';
         this.player.animFrame = 0;
         this.player.animTimer = 0;
